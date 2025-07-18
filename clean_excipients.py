@@ -3,6 +3,10 @@ import xml.etree.ElementTree as ET
 import re
 import csv
 
+EXCIPIENT_PAT = re.compile(
+    r"inactive ingredients[^:]*:\s*(.*)", re.I | re.S
+)
+
 NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 
 
@@ -38,10 +42,28 @@ def clean_text(text: str) -> str:
     return text.lower().strip()
 
 
+def parse_from_description(desc: str) -> str:
+    if not desc:
+        return ''
+    m = EXCIPIENT_PAT.search(desc)
+    if not m:
+        return ''
+    text = m.group(1)
+    text = re.sub(r"\([^\)]*\)", "", text)
+    return text.strip()
+
+
 def main():
     data = read_xlsx('test.xlsx')
     header = data[0]
-    rows = [dict(zip(header, r)) for r in data[1:]]
+    rows = []
+    for r in data[1:]:
+        if len(r) > len(header):
+            extra = [x or '' for x in r[len(header)-1:]]
+            r = r[:len(header)-1] + [' '.join(extra)]
+        if len(r) < len(header):
+            r += [''] * (len(header) - len(r))
+        rows.append(dict(zip(header, r)))
 
     results = []
     for row in rows:
@@ -57,7 +79,9 @@ def main():
                 break
         if not product:
             product = candidates[0]
-        excip = row.get('Excipients', '')
+        excip = parse_from_description(row.get('Drug Description', '') or row.get('English Description', ''))
+        if not excip:
+            excip = row.get('Excipients', '')
         cleaned = clean_text(excip)
         names = [p.strip() for p in re.split(r'[;,]', cleaned) if p.strip()]
         results.append((product, '; '.join(names)))
