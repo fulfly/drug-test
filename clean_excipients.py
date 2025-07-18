@@ -43,21 +43,24 @@ def main():
     header = data[0]
     rows = [dict(zip(header, r)) for r in data[1:]]
 
-    names_set = set()
+    results = []
     for row in rows:
+        product = (
+            row.get('English Product Name')
+            or row.get('English Common Name')
+            or row.get('English Drug Name')
+            or ''
+        )
         excip = row.get('Excipients', '')
         cleaned = clean_text(excip)
-        for part in re.split(r'[;,]', cleaned):
-            name = part.strip()
-            if name:
-                names_set.add(name)
+        names = [p.strip() for p in re.split(r'[;,]', cleaned) if p.strip()]
+        results.append((product, '; '.join(names)))
 
-    names = sorted(names_set)
-    with open('cleaned_excipients.csv', 'w', newline='') as f:
+    with open('drug_excipients.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['excipient'])
-        for n in names:
-            writer.writerow([n])
+        writer.writerow(['product', 'excipients'])
+        for product, excips in results:
+            writer.writerow([product, excips])
 
 if __name__ == '__main__':
     main()
