@@ -45,12 +45,18 @@ def main():
 
     results = []
     for row in rows:
-        product = (
-            row.get('English Product Name')
-            or row.get('English Common Name')
-            or row.get('English Drug Name')
-            or ''
-        )
+        candidates = [
+            row.get('English Product Name', ''),
+            row.get('English Common Name', ''),
+            row.get('English Drug Name', ''),
+        ]
+        product = ''
+        for cand in candidates:
+            if cand and re.search(r'[A-Za-z]', cand):
+                product = cand
+                break
+        if not product:
+            product = candidates[0]
         excip = row.get('Excipients', '')
         cleaned = clean_text(excip)
         names = [p.strip() for p in re.split(r'[;,]', cleaned) if p.strip()]
