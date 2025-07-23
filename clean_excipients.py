@@ -2,6 +2,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 import re
 import csv
+import sys
 
 EXCIPIENT_PAT = re.compile(
     r"inactive ingredients[^:]*:\s*(.*)", re.I | re.S
@@ -54,7 +55,10 @@ def parse_from_description(desc: str) -> str:
 
 
 def main():
-    data = read_xlsx('test.xlsx')
+    infile = sys.argv[1] if len(sys.argv) > 1 else 'test.xlsx'
+    outfile = sys.argv[2] if len(sys.argv) > 2 else 'drug_excipients.csv'
+
+    data = read_xlsx(infile)
     header = data[0]
     rows = []
     for r in data[1:]:
@@ -86,7 +90,7 @@ def main():
         names = [p.strip() for p in re.split(r'[;,]', cleaned) if p.strip()]
         results.append((product, '; '.join(names)))
 
-    with open('drug_excipients.csv', 'w', newline='') as f:
+    with open(outfile, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['product', 'excipients'])
         for product, excips in results:
