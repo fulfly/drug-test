@@ -17,6 +17,10 @@ device descriptors (e.g. syringes or needles) to a separate notes column,
 deduplicates the excipient names, and writes the result to
 `drug_excipients.csv`.
 
+Dosage-form descriptors leading a list (e.g. “tablet core,” “film coating,”
+or “polishing agent”) are stripped so the underlying excipient names are
+preserved.
+
 The generated CSV has three columns:
 
 - `product` – product name

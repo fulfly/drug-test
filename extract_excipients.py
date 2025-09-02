@@ -59,6 +59,12 @@ NOTE_KEYWORDS = {
     "walled",
 }
 
+# descriptors introducing dosage-form sections that should be stripped
+DESCRIPTOR_PAT = re.compile(
+    r"^(?:the\s+)?(tablet|tablets|capsule|capsules|capsule shell|tablet core|core|film coating|coating|polishing agent|powder|granules?|granule|suspension|solution)\b[:\s-]*",
+    re.I,
+)
+
 
 def read_excel(path: str) -> List[Dict[str, str]]:
     wb = load_workbook(path, data_only=True)
@@ -100,7 +106,7 @@ def _remove_leading(seg: str) -> str:
         seg = seg[colon + 1 :]
     elif verb:
         seg = seg[verb.end() :]
-    return seg.lstrip(" :;,")
+    return seg.lstrip(" .:;,")
 
 
 def parse_from_description(desc: str) -> str:
@@ -112,7 +118,16 @@ def parse_from_description(desc: str) -> str:
         start = m.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
         seg = desc[start:end]
+        seg = re.sub(
+            r"(structural formula|chemical structure|chem_structure|image of).*",
+            "",
+            seg,
+            flags=re.I,
+        )
         segments.append(_remove_leading(seg))
+    m = re.search(r"contains? ([^.;]*?) as inactive ingredients", desc, re.I)
+    if m:
+        segments.append(m.group(1))
     # also capture excipients described via diluent composition or microencapsulation
     extra = []
     m = re.search(
@@ -158,6 +173,7 @@ def split_excipients_notes(text: str):
     for token in tokens:
         if not re.search(r"[a-z]", token):
             continue
+        token = DESCRIPTOR_PAT.sub("", token).strip()
         m = re.search(r"\bcontains?\b", token)
         if m:
             before = token[: m.start()].strip()
@@ -166,6 +182,7 @@ def split_excipients_notes(text: str):
                 notes.append(before)
             token = after
         token = re.sub(r"^(and|or)\s+", "", token)
+        token = re.sub(r"^(?:are|is)?\s*(?:coated|polished|filled)\s+with\s+", "", token)
         if any(k in token for k in NOTE_KEYWORDS) or (
             "suspension" in token and len(token.split()) > 2
         ) or re.search(r"oral\s+solution", token):
