@@ -8,9 +8,10 @@ excipients:
 python extract_excipients.py input.xlsx drug_excipients.csv
 ```
 
-The script reads the Excel file, removes unrelated text such as concentration
-units and special characters, deduplicates the excipient names, and writes the
-result to `drug_excipients.csv`.
+The script reads the Excel file, locates excipient sections labelled as
+“Preservative,” “Inactives,” or “Inactive Ingredients,” removes unrelated text
+such as concentration units and special characters, deduplicates the excipient
+names, and writes the result to `drug_excipients.csv`.
 
 The generated CSV has three columns:
 

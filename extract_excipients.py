@@ -4,13 +4,10 @@ import sys
 from typing import List, Dict
 from openpyxl import load_workbook
 
-# capture excipients following the "Inactive Ingredients" label. Some monographs
-# use "Inactive ingredients:" while others phrase it as "Inactive ingredients are
-# ..." or "Inactive ingredients include ...". Allow common verbs in addition to a
-# trailing colon so these variants are captured.
-EXCIPIENT_PAT = re.compile(
-    r"inactive ingredients(?:[^:]*:|\s+(?:are|include|contain|consist of))\s*(.*)",
-    re.I | re.S,
+# match common section labels that precede excipient lists
+LABEL_PAT = re.compile(
+    r"(actives?|active ingredients?|preservatives?|inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients)\s*(?:[^:]*:|\s+(?:are|include|contain|consist of))\s*",
+    re.I,
 )
 # remove numbers followed by common concentration units (mg, g, %, etc.)
 UNIT_PAT = re.compile(r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b", re.I)
@@ -39,6 +36,8 @@ NOTE_KEYWORDS = {
     "reuptake",
     "inhibitor",
     "image",
+    "active",
+    "actives",
 }
 
 
@@ -64,9 +63,10 @@ def clean_text(text: str) -> str:
     text = re.sub(r"\([^)]*\)", "", text)
     text = text.replace("\n", " ")
     text = re.sub(r"\bno\.\s*(\d+)", r"no \1", text, flags=re.I)
-    text = text.replace(".", ";")
+    text = text.replace("and/or", "and or")
     text = re.sub(r"\s+", " ", text)
     text = UNIT_PAT.sub("", text)
+    text = text.replace(".", ";")
     text = re.sub(r"[^a-z0-9,;\s-]", " ", text.lower())
     text = re.sub(r"\s+", " ", text)
     return text.strip()
@@ -75,10 +75,18 @@ def clean_text(text: str) -> str:
 def parse_from_description(desc: str) -> str:
     if not desc:
         return ""
-    m = EXCIPIENT_PAT.search(desc)
-    if not m:
+    matches = list(LABEL_PAT.finditer(desc))
+    if not matches:
         return ""
-    text = m.group(1)
+    segments = []
+    for idx, m in enumerate(matches):
+        label = m.group(1).lower()
+        start = m.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
+        if label.startswith("active"):
+            continue
+        segments.append(desc[start:end])
+    text = " ".join(segments)
     text = re.sub(
         r"(structural formula|chemical structure|image of).*",
         "",
@@ -92,8 +100,9 @@ def split_excipients_notes(text: str):
     raw_tokens = [p.strip() for p in re.split(r"[;,]", text) if p.strip()]
     tokens = []
     for p in raw_tokens:
-        if re.search(r"\band\b", p) and not re.search(r"\d", p):
-            tokens.extend([x.strip() for x in re.split(r"\band\b", p) if x.strip()])
+        if re.search(r"\b(and|or)\b", p) and not re.search(r"\d", p):
+            parts = [x.strip() for x in re.split(r"\b(?:and|or)\b", p) if x.strip()]
+            tokens.extend(parts)
         else:
             tokens.append(p)
     excipients = []
@@ -106,6 +115,7 @@ def split_excipients_notes(text: str):
             if before:
                 notes.append(before)
             token = after
+        token = re.sub(r"^(and|or)\s+", "", token)
         if any(k in token for k in NOTE_KEYWORDS) or (
             "suspension" in token and len(token.split()) > 2
         ) or re.search(r"oral\s+solution", token):
