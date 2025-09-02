@@ -10,7 +10,10 @@ LABEL_PAT = re.compile(
     re.I,
 )
 # remove numbers followed by common concentration units (mg, g, %, etc.)
-UNIT_PAT = re.compile(r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b", re.I)
+UNIT_PAT = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b(?:/\s*(mg|g|kg|mcg|ug|µg|ml|l|%))?",
+    re.I,
+)
 
 # tokens containing any of these keywords will be moved to the notes column
 NOTE_KEYWORDS = {
@@ -84,6 +87,7 @@ def clean_text(text: str) -> str:
     text = UNIT_PAT.sub("", text)
     text = text.replace(".", ";")
     text = re.sub(r"[^a-z0-9,;\s-]", " ", text.lower())
+    text = re.sub(r"\b\d+\s+(?=[a-z])", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -103,15 +107,30 @@ def parse_from_description(desc: str) -> str:
     if not desc:
         return ""
     matches = list(LABEL_PAT.finditer(desc))
-    if not matches:
-        return ""
     segments = []
     for idx, m in enumerate(matches):
         start = m.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
         seg = desc[start:end]
         segments.append(_remove_leading(seg))
-    text = " ".join(segments)
+    # also capture excipients described via diluent composition or microencapsulation
+    extra = []
+    m = re.search(
+        r"micro[- ]encapsulated in ([^.]*?)(?:at|\.|,)", desc, re.I
+    )
+    if m:
+        extra.append(m.group(1))
+    m = re.search(
+        r"composition of the [^\.]*? includes (.*?)(?:\.(?!\d)|$)",
+        desc,
+        re.I | re.S,
+    )
+    if m:
+        extra.append(m.group(1))
+    segments.extend(extra)
+    if not segments:
+        return ""
+    text = "; ".join(segments)
     text = re.sub(
         r"(structural formula|chemical structure|chem_structure|image of).*",
         "",
