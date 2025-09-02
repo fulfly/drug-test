@@ -4,8 +4,14 @@ import sys
 from typing import List, Dict
 from openpyxl import load_workbook
 
-# capture excipients following the "Inactive Ingredients" label
-EXCIPIENT_PAT = re.compile(r"inactive ingredients[^:]*:\s*(.*)", re.I | re.S)
+# capture excipients following the "Inactive Ingredients" label. Some monographs
+# use "Inactive ingredients:" while others phrase it as "Inactive ingredients are
+# ..." or "Inactive ingredients include ...". Allow common verbs in addition to a
+# trailing colon so these variants are captured.
+EXCIPIENT_PAT = re.compile(
+    r"inactive ingredients(?:[^:]*:|\s+(?:are|include|contain|consist of))\s*(.*)",
+    re.I | re.S,
+)
 # remove numbers followed by common concentration units (mg, g, %, etc.)
 UNIT_PAT = re.compile(r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b", re.I)
 
@@ -32,6 +38,7 @@ NOTE_KEYWORDS = {
     "serotonin",
     "reuptake",
     "inhibitor",
+    "image",
 }
 
 
@@ -56,12 +63,11 @@ def clean_text(text: str) -> str:
         return ""
     text = re.sub(r"\([^)]*\)", "", text)
     text = text.replace("\n", " ")
+    text = re.sub(r"\bno\.\s*(\d+)", r"no \1", text, flags=re.I)
     text = text.replace(".", ";")
     text = re.sub(r"\s+", " ", text)
     text = UNIT_PAT.sub("", text)
-    text = re.sub(r"\b\d+\b", " ", text)
     text = re.sub(r"[^a-z0-9,;\s-]", " ", text.lower())
-    text = text.replace(" and ", "; ")
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
@@ -73,20 +79,33 @@ def parse_from_description(desc: str) -> str:
     if not m:
         return ""
     text = m.group(1)
-    text = re.sub(r"(structural formula|chemical structure).*", "", text, flags=re.I)
+    text = re.sub(
+        r"(structural formula|chemical structure|image of).*",
+        "",
+        text,
+        flags=re.I,
+    )
     return text.strip()
 
 
 def split_excipients_notes(text: str):
-    tokens = [p.strip() for p in re.split(r"[;,]", text) if p.strip()]
+    raw_tokens = [p.strip() for p in re.split(r"[;,]", text) if p.strip()]
+    tokens = []
+    for p in raw_tokens:
+        if re.search(r"\band\b", p) and not re.search(r"\d", p):
+            tokens.extend([x.strip() for x in re.split(r"\band\b", p) if x.strip()])
+        else:
+            tokens.append(p)
     excipients = []
     notes = []
     for token in tokens:
-        if "contains" in token:
-            before, after = token.split("contains", 1)
-            if before.strip():
-                notes.append(before.strip())
-            token = after.strip()
+        m = re.search(r"\bcontains?\b", token)
+        if m:
+            before = token[: m.start()].strip()
+            after = token[m.end() :].strip()
+            if before:
+                notes.append(before)
+            token = after
         if any(k in token for k in NOTE_KEYWORDS) or (
             "suspension" in token and len(token.split()) > 2
         ) or re.search(r"oral\s+solution", token):
@@ -134,7 +153,14 @@ def main():
             results.append((product, "", ""))
             continue
         excipients, notes = split_excipients_notes(cleaned)
-        results.append((product, "; ".join(excipients), "; ".join(notes)))
+        product_keywords = [c.lower() for c in candidates if c]
+        filtered_excipient_list = []
+        for e in excipients:
+            if any(pk in e for pk in product_keywords):
+                notes.append(e)
+            else:
+                filtered_excipient_list.append(e)
+        results.append((product, "; ".join(filtered_excipient_list), "; ".join(notes)))
 
     with open(outfile, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
