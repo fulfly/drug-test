@@ -1,0 +1,282 @@
+import csv
+import re
+import sys
+from typing import List, Dict
+from openpyxl import load_workbook
+
+# match section headers that typically introduce excipient lists
+LABEL_PAT = re.compile(
+    r"\b(inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients|preservatives?|inert ingredients)\b",
+    re.I,
+)
+# remove numbers followed by common concentration units (mg, g, %, etc.)
+UNIT_PAT = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b(?:/\s*(mg|g|kg|mcg|ug|µg|ml|l|%))?",
+    re.I,
+)
+
+# tokens containing any of these keywords are discarded as non-excipient descriptors
+DROP_KEYWORDS = {
+    "capsule",
+    "capsules",
+    "tablet",
+    "tablets",
+    "structural",
+    "formula",
+    "vial",
+    "bottle",
+    "oral",
+    "imprinted",
+    "available",
+    "granules",
+    "reconstituted",
+    "diluted",
+    "administration",
+    "inactive",
+    "constituted",
+    "form",
+    "serotonin",
+    "reuptake",
+    "inhibitor",
+    "image",
+    "active",
+    "actives",
+    "coating",
+    "system",
+    "components",
+    "performance",
+    "mixture",
+    "racemic",
+    "syringe",
+    "needle",
+    "plunger",
+    "stopper",
+    "kit",
+    "cap",
+    "backstop",
+    "rod",
+    "safety",
+    "walled",
+    "core",
+    "film",
+    "shell",
+    "coat",
+    "coated",
+    "polish",
+    "polishing",
+    "layer",
+    "single-dose",
+    "single dose",
+    "diluent",
+    "provided",
+    "supplied",
+    "package",
+    "range",
+    "ranges",
+    "equivalent",
+}
+
+
+def read_excel(path: str) -> List[Dict[str, str]]:
+    wb = load_workbook(path, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    header = [str(h) if h is not None else f"col{idx}" for idx, h in enumerate(rows[0])]
+    data: List[Dict[str, str]] = []
+    for row in rows[1:]:
+        row_dict: Dict[str, str] = {}
+        for h, v in zip(header, row):
+            row_dict[h] = str(v) if v is not None else ""
+        data.append(row_dict)
+    return data
+
+
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = text.replace("\n", " ")
+    text = re.sub(r"\bno\.\s*(\d+)", r"no \1", text, flags=re.I)
+    text = text.replace("and/or", "and or")
+    text = re.sub(r"\s+", " ", text)
+    text = UNIT_PAT.sub("", text)
+    # replace long dash sequences used before concentrations
+    text = re.sub(r"\s*[–—-]{2,}\s*", "; ", text)
+    text = text.replace(":", ";")
+    text = text.replace(".", ";")
+    text = re.sub(r"[^a-z0-9,;\s-]", " ", text.lower())
+    text = re.sub(r"\binactive ingredients?\b", "", text)
+    text = re.sub(r"(^|[;,(])\d+\s+(?=[a-z])", r"\1", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _remove_leading(seg: str) -> str:
+    seg = seg.lstrip()
+    colon = seg.find(":")
+    verb = re.search(r"\b(are|include|contain(?:s)?|consist of)\b", seg, re.I)
+    if colon != -1 and (verb is None or colon < verb.start()):
+        seg = seg[colon + 1 :]
+    elif verb:
+        seg = seg[verb.end() :]
+    return seg.lstrip(" :;,")
+
+
+def parse_from_description(desc: str) -> str:
+    if not desc:
+        return ""
+    matches = list(LABEL_PAT.finditer(desc))
+    segments = []
+    for idx, m in enumerate(matches):
+        start = m.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
+        seg = desc[start:end]
+        seg = _remove_leading(seg)
+        seg = seg.split(".", 1)[0]
+        segments.append(seg)
+    m = re.search(r"([^\.]*?)\s+as\s+inactive ingredients?\b", desc, re.I)
+    if m:
+        segments.insert(0, m.group(1))
+    # also capture excipients described via diluent composition or microencapsulation
+    extra = []
+    m = re.search(
+        r"micro[- ]encapsulated in ([^.]*?)(?:at|\.|,)", desc, re.I
+    )
+    if m:
+        extra.append(m.group(1))
+    m = re.search(
+        r"composition of the [^\.]*? includes (.*?)(?:\.(?!\d)|$)",
+        desc,
+        re.I | re.S,
+    )
+    if m:
+        extra.append(m.group(1))
+    # capture formulas like "each vial contains X, Y and Z" dropping the first active item
+    m = re.search(r"each[^.]*?contains([^.]*)", desc, re.I)
+    if m:
+        seg = m.group(1)
+        parts = seg.split(",", 1)
+        if len(parts) > 1:
+            extra.append(parts[1])
+    for seg in extra:
+        segments.append(seg.rstrip(". "))
+    if not segments:
+        return ""
+    text = "; ".join(segments)
+    text = re.sub(
+        r"(structural formula|chemical structure|chem_structure|image of).*",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\s+is the (?:coloring agent|ink pigment)[^.;]*", "", text, flags=re.I)
+    text = re.sub(r"\bthe tablet coating (?:consists of|is composed of)\b", "", text, flags=re.I)
+    text = re.sub(r"and the following colorants?", ";", text, flags=re.I)
+    text = re.split(r"system components", text, flags=re.I)[0]
+    return text.strip()
+
+
+def split_excipients(text: str) -> List[str]:
+    raw_tokens = [p.strip() for p in re.split(r"[;,]", text) if p.strip()]
+    tokens = []
+    for p in raw_tokens:
+        if re.search(r"\b(and|or)\b", p) and not re.search(r"\d", p):
+            parts = [x.strip() for x in re.split(r"\b(?:and|or)\b", p) if x.strip()]
+            tokens.extend(parts)
+        else:
+            tokens.append(p)
+    excipients = []
+    for token in tokens:
+        if not re.search(r"[a-z]", token):
+            continue
+        m = re.search(r"\bcontains?\b", token)
+        if m:
+            token = token[m.end() :].strip()
+        m = re.search(r"\b(polished|coated)\s+with\b", token)
+        if m:
+            token = token[m.end() :].strip()
+        token = re.sub(r"^(and|or)\s+", "", token)
+        token = re.sub(r"\bas$", "", token)
+        token = re.sub(r"\bto\s*\d+(?:\.\d+)?\b", "", token)
+        token = re.sub(r"\bph\s*\d+(?:\.\d+)?\b", "", token)
+        token = re.sub(r"\b\d+\b$", "", token)
+        token = token.strip()
+        if any(k in token for k in DROP_KEYWORDS) or (
+            "suspension" in token and len(token.split()) > 2
+        ) or re.search(r"oral\s+solution", token):
+            continue
+        excipients.append(token)
+
+    # dedupe while preserving order
+    def dedupe(items):
+        seen = set()
+        result = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                result.append(item)
+        return result
+
+    return dedupe(excipients)
+
+
+def main():
+    infile = sys.argv[1] if len(sys.argv) > 1 else "input.xlsx"
+    outfile = sys.argv[2] if len(sys.argv) > 2 else "drug_excipients.csv"
+    rows = read_excel(infile)
+    results = []
+    for row in rows:
+        candidates = [
+            row.get("English Product Name", ""),
+            row.get("English Common Name", ""),
+            row.get("English Drug Name", ""),
+        ]
+        product = ""
+        for cand in candidates:
+            if cand and re.search(r"[A-Za-z]", cand):
+                product = cand.strip()
+                break
+        if not product:
+            product = candidates[0]
+
+        desc = row.get("Drug Description", "") or row.get("English Description", "")
+        excip_desc = parse_from_description(desc)
+        extra = row.get("Excipients", "")
+        if extra:
+            excip = f"{excip_desc}; {extra}" if excip_desc else extra
+        else:
+            excip = excip_desc
+        cleaned = clean_text(excip)
+        if not cleaned:
+            results.append((product, ""))
+            continue
+        excipients = split_excipients(cleaned)
+        product_keywords = []
+        for c in candidates:
+            if c:
+                lc = c.lower()
+                product_keywords.append(lc)
+                product_keywords.extend(lc.split())
+        filtered_excipient_list = []
+        for e in excipients:
+            token = e
+            for pk in product_keywords:
+                token = token.replace(pk, "").strip()
+            token = re.sub(r"\bequivalent\s+to\b", "", token)
+            token = token.strip(" ,;")
+            if not token or any(pk in token for pk in product_keywords):
+                continue
+            filtered_excipient_list.append(token)
+        results.append((product, "; ".join(filtered_excipient_list)))
+
+    with open(outfile, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["product", "excipients"])
+        for product, excips in results:
+            writer.writerow([product, excips])
+
+
+if __name__ == "__main__":
+    main()
