@@ -4,9 +4,9 @@ import sys
 from typing import List, Dict
 from openpyxl import load_workbook
 
-# match common section labels that precede excipient lists
+# match section headers that typically introduce excipient lists
 LABEL_PAT = re.compile(
-    r"(actives?|active ingredients?|preservatives?|inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients)\s*(?:[^:]*:|\s+(?:are|include|contain|consist of))\s*",
+    r"\b(inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients|preservatives?|inert ingredients)\b",
     re.I,
 )
 # remove numbers followed by common concentration units (mg, g, %, etc.)
@@ -38,6 +38,22 @@ NOTE_KEYWORDS = {
     "image",
     "active",
     "actives",
+    "coating",
+    "system",
+    "components",
+    "performance",
+    "mixture",
+    "racemic",
+    "syringe",
+    "needle",
+    "plunger",
+    "stopper",
+    "kit",
+    "cap",
+    "backstop",
+    "rod",
+    "safety",
+    "walled",
 }
 
 
@@ -72,6 +88,17 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def _remove_leading(seg: str) -> str:
+    seg = seg.lstrip()
+    colon = seg.find(":")
+    verb = re.search(r"\b(are|include|contain|consist of)\b", seg, re.I)
+    if colon != -1 and (verb is None or colon < verb.start()):
+        seg = seg[colon + 1 :]
+    elif verb:
+        seg = seg[verb.end() :]
+    return seg.lstrip(" :;,")
+
+
 def parse_from_description(desc: str) -> str:
     if not desc:
         return ""
@@ -80,19 +107,21 @@ def parse_from_description(desc: str) -> str:
         return ""
     segments = []
     for idx, m in enumerate(matches):
-        label = m.group(1).lower()
         start = m.end()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
-        if label.startswith("active"):
-            continue
-        segments.append(desc[start:end])
+        seg = desc[start:end]
+        segments.append(_remove_leading(seg))
     text = " ".join(segments)
     text = re.sub(
-        r"(structural formula|chemical structure|image of).*",
+        r"(structural formula|chemical structure|chem_structure|image of).*",
         "",
         text,
         flags=re.I,
     )
+    text = re.sub(r"\s+is the (?:coloring agent|ink pigment)[^.;]*", "", text, flags=re.I)
+    text = re.sub(r"\bthe tablet coating (?:consists of|is composed of)\b", "", text, flags=re.I)
+    text = re.sub(r"and the following colorants?", ";", text, flags=re.I)
+    text = re.split(r"system components", text, flags=re.I)[0]
     return text.strip()
 
 
@@ -108,6 +137,8 @@ def split_excipients_notes(text: str):
     excipients = []
     notes = []
     for token in tokens:
+        if not re.search(r"[a-z]", token):
+            continue
         m = re.search(r"\bcontains?\b", token)
         if m:
             before = token[: m.start()].strip()
