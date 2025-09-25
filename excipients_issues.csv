@@ -1,0 +1,47 @@
+product,row_number,issues
+VENLAFAXINE HYDROCHLORIDE,2,placeholder_value
+Ursodiol,3,duplicate_product
+Ursodiol,4,duplicate_product
+Ativan,9,placeholder_value
+Zyprexa,13,placeholder_value
+SIMVASTATIN,15,regulatory_note: 'no longer marketed'
+Zocor,16,regulatory_note: 'no longer marketed'
+Xenical,19,chemical_structure_reference: 'chiral'; duplicate_product
+Xenical,20,chemical_structure_reference: 'chiral'; duplicate_product
+,23,placeholder_value
+Valtrex,25,duplicate_product
+Valtrex,26,duplicate_product
+Trileptal,28,duplicate_product
+Trileptal,29,duplicate_product
+Topamax,31,duplicate_product
+Topamax,32,duplicate_product
+Vimpat,35,non_exipient_description: 'is a clear'
+Protonix,39,duplicate_product
+Protonix,40,duplicate_product
+Nexium,43,duplicate_product
+Nexium,44,duplicate_product
+Nexium,45,duplicate_product
+PALIPERIDONE PALMITATE,55,duplicate_product
+Paxil CR,62,duplicate_product
+Paxil CR,63,duplicate_product
+Creon,64,duplicate_product
+Creon,65,duplicate_product
+Norvasc,71,duplicate_product
+Norvasc,72,duplicate_product
+Singulair,75,duplicate_product
+Singulair,76,duplicate_product
+Micardis,78,duplicate_product
+Micardis,79,duplicate_product
+Lipitor,83,duplicate_product
+Lipitor,84,duplicate_product
+Lamictal XR,86,duplicate_product
+Lamictal XR,87,duplicate_product
+PALIPERIDONE PALMITATE,93,duplicate_product
+Invega,94,duplicate_product
+Invega,95,duplicate_product
+Multaq,109,duplicate_product
+Multaq,110,duplicate_product
+Celebrex,119,duplicate_product
+Celebrex,120,duplicate_product
+Cardura XL,121,duplicate_product
+Cardura XL,122,duplicate_product
