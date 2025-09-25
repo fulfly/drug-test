@@ -9,6 +9,10 @@ LABEL_PAT = re.compile(
     r"\b(inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients|preservatives?|inert ingredients)\b",
     re.I,
 )
+SENTENCE_KEYWORD_PAT = re.compile(
+    r"\b((also\s+)?(contain|contains|consist|consists|include|includes|comprised|comprise|composed|made up|made of|inactive ingredients))\b",
+    re.I,
+)
 # remove numbers followed by common concentration units (mg, g, %, etc.)
 UNIT_PAT = re.compile(
     r"\b\d+(?:\.\d+)?\s*(mg|g|kg|mcg|ug|µg|ml|l|%)\b(?:/\s*(mg|g|kg|mcg|ug|µg|ml|l|%))?",
@@ -74,6 +78,14 @@ DROP_KEYWORDS = {
     "range",
     "ranges",
     "equivalent",
+    "structure",
+    "structures",
+    "following",
+    "constitution",
+    "reconstitution",
+    "after reconstitution",
+    "after constitution",
+    "chem structure",
 }
 
 
@@ -124,6 +136,29 @@ def _remove_leading(seg: str) -> str:
     return seg.lstrip(" :;,")
 
 
+def _trim_after_sentence(seg: str) -> str:
+    """Remove trailing sentences that start after a full stop."""
+
+    parts = re.split(r"\.(?=\s*[A-Z])", seg)
+    kept = []
+    for part in parts:
+        stripped = part.strip()
+        if not stripped:
+            continue
+        if not kept:
+            kept.append(stripped)
+            continue
+        if SENTENCE_KEYWORD_PAT.search(stripped):
+            kept.append(stripped)
+        else:
+            break
+    if not kept and seg.strip():
+        kept.append(seg.strip())
+    trimmed = "; ".join(kept)
+    trimmed = re.sub(r"\bproduct meets[^.]*$", "", trimmed, flags=re.I)
+    return trimmed.strip()
+
+
 def parse_from_description(desc: str) -> str:
     if not desc:
         return ""
@@ -134,11 +169,11 @@ def parse_from_description(desc: str) -> str:
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(desc)
         seg = desc[start:end]
         seg = _remove_leading(seg)
-        seg = seg.split(".", 1)[0]
+        seg = _trim_after_sentence(seg)
         segments.append(seg)
     m = re.search(r"([^\.]*?)\s+as\s+inactive ingredients?\b", desc, re.I)
     if m:
-        segments.insert(0, m.group(1))
+        segments.insert(0, _trim_after_sentence(m.group(1)))
     # also capture excipients described via diluent composition or microencapsulation
     extra = []
     m = re.search(
@@ -161,7 +196,7 @@ def parse_from_description(desc: str) -> str:
         if len(parts) > 1:
             extra.append(parts[1])
     for seg in extra:
-        segments.append(seg.rstrip(". "))
+        segments.append(_trim_after_sentence(seg.rstrip(". ")))
     if not segments:
         return ""
     text = "; ".join(segments)
@@ -201,8 +236,9 @@ def split_excipients(text: str) -> List[str]:
         token = re.sub(r"\bas$", "", token)
         token = re.sub(r"\bto\s*\d+(?:\.\d+)?\b", "", token)
         token = re.sub(r"\bph\s*\d+(?:\.\d+)?\b", "", token)
-        token = re.sub(r"\b\d+\b$", "", token)
         token = token.strip()
+        if not re.search(r"(fd\s*c|d\s*c|no\s*\d+|peg\s*-?\s*\d+|macrogol\s*\d+|polysorbate\s*\d+)", token):
+            token = re.sub(r"\b\d+\b$", "", token).strip()
         if any(k in token for k in DROP_KEYWORDS) or (
             "suspension" in token and len(token.split()) > 2
         ) or re.search(r"oral\s+solution", token):
@@ -266,6 +302,10 @@ def main():
                 token = token.replace(pk, "").strip()
             token = re.sub(r"\bequivalent\s+to\b", "", token)
             token = token.strip(" ,;")
+            if token.startswith("of "):
+                continue
+            if len(token.replace(" ", "")) < 3:
+                continue
             if not token or any(pk in token for pk in product_keywords):
                 continue
             filtered_excipient_list.append(token)
