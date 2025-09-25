@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 
 # match section headers that typically introduce excipient lists
 LABEL_PAT = re.compile(
-    r"\b(inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients|preservatives?|inert ingredients)\b",
+    r"\b(inactive ingredients?|inactives?|other ingredients|inactive components|nonmedicinal ingredients|preservatives?|inert ingredients|excipients?)\b",
     re.I,
 )
 SENTENCE_KEYWORD_PAT = re.compile(
@@ -86,6 +86,79 @@ DROP_KEYWORDS = {
     "after reconstitution",
     "after constitution",
     "chem structure",
+}
+
+PRESERVE_KEYWORDS = {
+    "sodium",
+    "magnesium",
+    "calcium",
+    "potassium",
+    "chloride",
+    "chlorides",
+    "hydroxide",
+    "hydroxides",
+    "phosphate",
+    "phosphates",
+    "sulfate",
+    "sulfates",
+    "sulphate",
+    "sulphates",
+    "oxide",
+    "oxides",
+    "dioxide",
+    "lactose",
+    "mannitol",
+    "cellulose",
+    "povidone",
+    "starch",
+    "starches",
+    "gelatin",
+    "gelatine",
+    "wax",
+    "waxes",
+    "water",
+    "anhydrous",
+    "glycol",
+    "glycols",
+    "alcohol",
+    "alcohols",
+    "glycerin",
+    "glycerine",
+    "citric",
+    "acid",
+    "acids",
+    "triethyl",
+    "citrate",
+    "triacetin",
+    "carnauba",
+    "titanium",
+    "iron",
+    "edetate",
+    "disodium",
+    "polysorbate",
+    "polyethylene",
+    "macrogol",
+    "xanthan",
+    "gum",
+    "gums",
+    "carboxymethylcellulose",
+    "hypromellose",
+    "hydroxypropyl",
+    "methylcellulose",
+    "paraben",
+    "parabens",
+    "methylparaben",
+    "propylparaben",
+    "sorbitol",
+    "stearyl",
+    "fumarate",
+    "lecithin",
+    "benzalkonium",
+    "carmellose",
+    "microcrystalline",
+    "colloidal",
+    "silicon",
+    "silica",
 }
 
 
@@ -189,7 +262,7 @@ def parse_from_description(desc: str) -> str:
     if m:
         extra.append(m.group(1))
     # capture formulas like "each vial contains X, Y and Z" dropping the first active item
-    m = re.search(r"each[^.]*?contains([^.]*)", desc, re.I)
+    m = re.search(r"each[^.]*?contains(.*?)(?:\.(?!\d)|$)", desc, re.I | re.S)
     if m:
         seg = m.group(1)
         parts = seg.split(",", 1)
@@ -236,6 +309,8 @@ def split_excipients(text: str) -> List[str]:
         token = re.sub(r"\bas$", "", token)
         token = re.sub(r"\bto\s*\d+(?:\.\d+)?\b", "", token)
         token = re.sub(r"\bph\s*\d+(?:\.\d+)?\b", "", token)
+        token = re.sub(r"\bto adjust p?h\b.*", "", token)
+        token = re.sub(r"\bfor (?:the )?adjustment of p?h\b.*", "", token)
         token = token.strip()
         if not re.search(r"(fd\s*c|d\s*c|no\s*\d+|peg\s*-?\s*\d+|macrogol\s*\d+|polysorbate\s*\d+)", token):
             token = re.sub(r"\b\d+\b$", "", token).strip()
@@ -294,19 +369,24 @@ def main():
             if c:
                 lc = c.lower()
                 product_keywords.append(lc)
-                product_keywords.extend(lc.split())
+                for word in lc.split():
+                    word = word.strip()
+                    if not word or word in PRESERVE_KEYWORDS:
+                        continue
+                    product_keywords.append(word)
         filtered_excipient_list = []
         for e in excipients:
             token = e
             for pk in product_keywords:
-                token = token.replace(pk, "").strip()
+                pattern = re.compile(r"\b" + re.escape(pk) + r"\b")
+                token = pattern.sub("", token).strip()
             token = re.sub(r"\bequivalent\s+to\b", "", token)
             token = token.strip(" ,;")
             if token.startswith("of "):
                 continue
             if len(token.replace(" ", "")) < 3:
                 continue
-            if not token or any(pk in token for pk in product_keywords):
+            if not token or any(re.search(r"\b" + re.escape(pk) + r"\b", token) for pk in product_keywords):
                 continue
             filtered_excipient_list.append(token)
         results.append((product, "; ".join(filtered_excipient_list)))

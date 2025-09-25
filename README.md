@@ -12,10 +12,13 @@ The script reads the Excel file, locates excipient sections labelled with
 phrases such as “Inactive Ingredients,” “Other Ingredients,” or
 “Preservatives,” and also captures excipients described in diluent
 composition lines, “micro‑encapsulated in” phrases, or statements like
-“each vial contains ...”. It converts long dash separators to commas,
-removes unrelated text such as concentration units or words like
-“equivalent,” filters out packaging or device descriptors, deduplicates
-the excipient names, and writes the result to `drug_excipients.csv`.
+“each vial contains ...” (including cases that list numeric concentrations
+with decimals). It converts long dash separators to commas, removes
+unrelated text such as concentration units or words like “equivalent,”
+filters out packaging or device descriptors, deduplicates the excipient
+names, and writes the result to `drug_excipients.csv`. When trimming out
+product names, the parser preserves common ionic words (e.g. “sodium,”
+“chloride,” “hydroxide”) so salts remain intact in the final output.
 
 Subheadings like “tablet core:” or “film coating:” are split so their
 ingredients are captured, while simple enumeration numbers are stripped and
