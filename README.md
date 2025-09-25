@@ -29,3 +29,20 @@ The generated CSV has two columns:
 
 - `product` – product name
 - `excipients` – deduplicated list of excipient names
+
+### Reviewing the output
+
+Run the review helper to highlight rows that still contain suspicious text or
+missing data without altering the source CSV:
+
+```
+python review_excipients.py drug_excipients.csv excipients_issues.csv
+```
+
+The script scans the `excipients` column for placeholder values, lingering
+units, packaging/device terminology (e.g. “vial,” “needle,” “single-use”),
+chemical-structure references, and other phrases that typically indicate the
+row needs manual cleanup. Each problematic entry is written to
+`excipients_issues.csv` together with the 1-based row number from the original
+dataset and the list of detected issues so the original spreadsheet can be
+reviewed safely before any edits are made.
